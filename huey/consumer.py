@@ -466,6 +466,7 @@ class Consumer(object):
         self._logger.debug('Checking worker health.')
         workers = []
         restart_occurred = False
+        add_worker_occurred = False
         for i, (worker, worker_t) in enumerate(self.worker_threads):
             if not self.environment.is_alive(worker_t):
                 self._logger.warning('Worker %d died, restarting.' % (i + 1))
@@ -475,16 +476,28 @@ class Consumer(object):
                 restart_occurred = True
             workers.append((worker, worker_t))
 
-        if restart_occurred:
+        for i in range(len(workers), self.workers):
+            worker = self._create_worker()
+            process = self._create_process(worker, 'Worker-%d' % (i + 1))
+            self._logger.info('Added Worker %d.' % (i + 1))
+            workers.append((worker, process))
+            process.start()
+
+        if restart_occurred or add_worker_occurred:
             self.worker_threads = workers
         else:
             self._logger.debug('Workers are up and running.')
 
-        return not restart_occurred
+        return not (restart_occurred or add_worker_occurred)
 
     def _set_signal_handler(self):
-        signal.signal(signal.SIGTERM, self._handle_signal)
+        signal.signal(signal.SIGTERM, self._handle_term)
+        signal.signal(signal.SIGUSR1, self._handle_usr1)
 
-    def _handle_signal(self, sig_num, frame):
+    def _handle_term(self, sig_num, frame):
         self._logger.info('Received SIGTERM')
         self._received_signal = True
+
+    def _handle_usr1(self, sig_num, frame):
+        self._logger.info('Received SIGUSR1')
+        self.workers += 1
